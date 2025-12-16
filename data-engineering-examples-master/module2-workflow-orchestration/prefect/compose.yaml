@@ -1,0 +1,93 @@
+x-prefect-image:  &prefect-image prefecthq/prefect:${PREFECT_VERSION:-3.1.15-python3.12-kubernetes}
+x-postgres-image: &postgres-image postgres:${POSTGRES_VERSION:-17-alpine}
+
+services:
+  ingest-db:
+    image: *postgres-image
+    container_name: ingest-db
+    environment:
+      POSTGRES_USER: 'postgres'
+      POSTGRES_PASSWORD: 'postgres'
+      POSTGRES_DB: 'nyc_taxi'
+    ports:
+      - '5432:5432'
+    volumes:
+      - vol-ingest-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: on-failure
+
+  prefect-metastore:
+    image: *postgres-image
+    container_name: prefect-metastore
+    environment:
+      POSTGRES_USER: 'prefect'
+      POSTGRES_PASSWORD: 'prefect'
+      POSTGRES_DB: 'prefect'
+    ports:
+      - '5432'
+    volumes:
+      - vol-prefect-metastore:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prefect"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: on-failure
+
+  prefect-server:
+    image: *prefect-image
+    container_name: prefect-server
+    entrypoint: ["/opt/prefect/entrypoint.sh", "prefect", "server", "start"]
+    environment:
+      PREFECT_UI_URL: 'http://localhost:4200'
+      PREFECT_API_URL: 'http://localhost:4200/api'
+      PREFECT_SERVER_API_HOST: '0.0.0.0'
+      PREFECT_API_DATABASE_CONNECTION_URL: 'postgresql+asyncpg://prefect:prefect@prefect-metastore:5432/prefect'
+      EXTRA_PIP_PACKAGES: 'prefect-gcp'
+    ports:
+      - "4200:4200"
+    volumes:
+      - vol-prefect-server:/root/.prefect
+    depends_on:
+      prefect-metastore:
+        condition: service_healthy
+    restart: on-failure
+
+  prefect-worker:
+    image: *prefect-image
+    container_name: prefect-worker
+    entrypoint: ["/opt/prefect/entrypoint.sh", "prefect", "worker", "start", "-p", "workflow_p0"]
+    environment:
+      PREFECT_API_URL: "http://prefect-server:4200/api"
+#      PREFECT_API_KEY: "PREFECT_CLOUD_API_KEY" # When connecting to an Agent in Prefect Cloud
+    depends_on:
+      prefect-server:
+        condition: service_started
+    restart: on-failure:5
+
+  prefect-cli:
+    image: *prefect-image
+    container_name: prefect-cli
+    entrypoint: /bin/bash
+    working_dir: "/prefect/flows"
+    tty: true
+    environment:
+      PREFECT_API_URL: "http://prefect-server:4200/api"
+#      PREFECT_API_KEY: "PREFECT_CLOUD_API_KEY" # When connecting to an Agent in Prefect Cloud
+    volumes:
+      - "./flows:/prefect/flows"
+    depends_on:
+      prefect-server:
+        condition: service_started
+
+volumes:
+  vol-ingest-db:
+    name: vol-ingest-db
+  vol-prefect-metastore:
+    name: vol-prefect-metastore
+  vol-prefect-server:
+    name: vol-prefect-server

@@ -1,0 +1,133 @@
+x-superset-image: &superset-image apache/superset:${SUPERSET_VERSION:-4.0.2}
+x-postgres-image: &postgres-image postgres:${POSTGRES_VERSION:-17-alpine}
+x-redis-image: &redis-image redis:${REDIS_VERSION:-7-alpine}
+
+x-superset-common:
+  &superset-common
+  image: *superset-image
+  user: 'root'
+  environment:
+    &superset-common-env
+    # Superset PostgreSQL config
+    DATABASE_DIALECT: 'postgresql'
+    DATABASE_HOST: 'superset-db'
+    DATABASE_PORT: 5432
+    DATABASE_DB: 'superset'
+    DATABASE_USER: 'superset'
+    DATABASE_PASSWORD: 'superset'
+    # Caching Cache config
+    REDIS_HOST: 'superset-cache'
+    REDIS_PORT: 6379
+    # Superset specific env vars
+    SUPERSET_ENV: 'production'
+    SUPERSET_PORT: 8088
+    SUPERSET_LOAD_EXAMPLES: ${SUPERSET_LOAD_EXAMPLES:-no}
+    SUPERSET_SECRET_KEY: 'TEST_NON_DEV_SECRET'
+    CYPRESS_CONFIG: 'false'
+    MAPBOX_API_KEY: ''
+    # Add the mapped in /app/pythonpath_docker which allows devs to override stuff
+    PYTHONPATH: '/app/pythonpath:/app/docker/pythonpath_dev'
+    # Examples DB
+    EXAMPLES_HOST: 'superset-db'
+    EXAMPLES_PORT: 5432
+    EXAMPLES_DB: 'examples'
+    EXAMPLES_USER: 'examples'
+    EXAMPLES_PASSWORD: 'examples'
+  volumes: 
+    &superset-common-volumes
+    - ./superset:/app/docker
+    - vol-superset-home:/app/superset_home
+  depends_on:
+    &superset-common-depends-on
+    superset-db:
+      condition: service_healthy
+    superset-cache:
+      condition: service_healthy
+
+services:
+  superset-db:
+    image: *postgres-image
+    container_name: superset-db
+    environment:
+      POSTGRES_DB: 'superset'
+      POSTGRES_USER: 'superset'
+      POSTGRES_PASSWORD: 'superset'
+      EXAMPLES_DB: 'examples'
+      EXAMPLES_USER: 'examples'
+      EXAMPLES_PASSWORD: 'examples'
+    ports:
+      - '5432'
+    volumes:
+      - vol-superset-db:/var/lib/postgresql/data
+      - ./superset/examples-init.sh:/docker-entrypoint-initdb.d/examples-init.sh
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U superset"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: on-failure
+
+  superset-cache:
+    image: *redis-image
+    container_name: superset-cache
+    ports:
+      - '6379'
+    volumes:
+      - vol-superset-cache:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: on-failure
+
+  superset:
+    <<: *superset-common
+    container_name: superset
+    command: ["/app/docker/docker-bootstrap.sh", "app-gunicorn"]
+    ports:
+      - 8088:8088
+    depends_on:
+      <<: *superset-common-depends-on
+      superset-init:
+        condition: service_completed_successfully
+    restart: on-failure
+
+  superset-worker:
+    <<: *superset-common
+    container_name: superset-worker
+    command: ["/app/docker/docker-bootstrap.sh", "worker"]
+    depends_on:
+      <<: *superset-common-depends-on
+      superset-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A superset.tasks.celery_app:app inspect ping -d celery@$$HOSTNAME"]
+    restart: on-failure
+
+  superset-worker-beat:
+    <<: *superset-common
+    container_name: superset-worker-beat
+    command: ["/app/docker/docker-bootstrap.sh", "beat"]
+    depends_on:
+      <<: *superset-common-depends-on
+      superset-init:
+        condition: service_completed_successfully
+    healthcheck:
+      disable: true
+    restart: on-failure
+
+  superset-init:
+    <<: *superset-common
+    container_name: superset-init
+    command: ["/app/docker/docker-init.sh"]
+    healthcheck:
+      disable: true
+
+volumes:
+  vol-superset-home:
+    name: 'vol-superset-home'
+  vol-superset-db:
+    name: 'vol-superset-db'
+  vol-superset-cache:
+    name: 'vol-superset-cache'

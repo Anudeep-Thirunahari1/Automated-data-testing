@@ -1,0 +1,10 @@
+version: 2
+
+sources:
+  - name: raw_nyc_tlc_record_data
+    database: "{{ env_var('DBT_POSTGRES_DATABASE') }}"
+    schema:   "{{ env_var('DBT_POSTGRES_SOURCE_SCHEMA') }}"
+    tables:
+      - name: fhv_trips
+      - name: green_taxi_trips
+      - name: yellow_taxi_trips

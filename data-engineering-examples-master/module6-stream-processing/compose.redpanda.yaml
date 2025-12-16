@@ -1,0 +1,117 @@
+x-redpanda-image: &redpanda-image redpandadata/redpanda:${REDPANDA_VERSION:-v24.2.13}
+
+x-conduktor-console: &conduktor-console-image conduktor/conduktor-console:${CONDUKTOR_PLATFORM_VERSION:-1.29.2}
+x-conduktor-cortex: &conduktor-cortex-image conduktor/conduktor-console-cortex:${CONDUKTOR_PLATFORM_VERSION:-1.29.2}
+x-postgres-image: &postgres-image postgres:${POSTGRES_VERSION:-17-alpine}
+
+services:
+  broker0:
+    image: *redpanda-image
+    container_name: broker0
+    hostname: broker0
+    command:
+      - redpanda start
+      - --smp 1
+      - --overprovisioned
+      - --node-id 0
+      - --kafka-addr INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092
+      - --advertise-kafka-addr INTERNAL://broker0:29092,EXTERNAL://localhost:9092
+      - --pandaproxy-addr 0.0.0.0:8082
+      - --advertise-pandaproxy-addr localhost:8082
+    ports:
+      - '9092:9092' # Redpanda Broker
+      - '8081:8081' # Schema Registry
+      - '8082:8082' # REST Proxy
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health -e || exit 1"]
+      start_period: 10s
+      interval: 5s
+      timeout: 10s
+      retries: 5
+    restart: on-failure:5
+
+  # Conduktor Platform Docs:
+  # https://docs.conduktor.io/platform/configuration/env-variables
+  conduktor-console:
+    image: *conduktor-console-image
+    container_name: conduktor-console
+    hostname: conduktor-console
+    environment:
+      CDK_CLUSTERS_0_ID: 'redpanda-in-docker'
+      CDK_CLUSTERS_0_NAME: 'single-broker-redpanda'
+      CDK_CLUSTERS_0_BOOTSTRAPSERVERS: 'broker0:29092'
+      CDK_CLUSTERS_0_SCHEMAREGISTRY_URL: 'http://broker0:8081'
+      CDK_DATABASE_URL: "postgresql://postgres:postgres@conduktor-metastore:5432/conduktor"
+      CDK_KAFKASQL_DATABASE_URL: "postgresql://postgres:postgres@conduktor-sql:5432/conduktor-sql"
+      CDK_MONITORING_CORTEX-URL: http://conduktor-monitoring:9009/
+      CDK_MONITORING_ALERT-MANAGER-URL: http://conduktor-monitoring:9010/
+      CDK_MONITORING_CALLBACK-URL: http://conduktor-console:8080/monitoring/api/
+      CDK_MONITORING_NOTIFICATIONS-CALLBACK-URL: http://localhost:8080
+      CDK_LISTENING_PORT: 8080
+    ports:
+      - '8080:8080'
+    volumes:
+      - vol-conduktor-data:/var/conduktor
+    depends_on:
+      broker0:
+        condition: service_started
+    restart: on-failure:5
+
+  conduktor-metastore:
+    image: *postgres-image
+    container_name: conduktor-metastore
+    hostname: conduktor-metastore
+    environment:
+      POSTGRES_USER: 'postgres'
+      POSTGRES_PASSWORD: 'postgres'
+      POSTGRES_DB: 'conduktor'
+      POSTGRES_HOST_AUTH_METHOD: "scram-sha-256"
+    ports:
+      - '5432'
+    volumes:
+      - vol-conduktor-metastore:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: on-failure:5
+
+  conduktor-sql:
+    image: *postgres-image
+    container_name: conduktor-sql
+    hostname: conduktor-sql
+    environment:
+      POSTGRES_USER: 'postgres'
+      POSTGRES_PASSWORD: 'postgres'
+      POSTGRES_DB: 'conduktor-sql'
+      POSTGRES_HOST_AUTH_METHOD: "scram-sha-256"
+    ports:
+      - '5432'
+    volumes:
+      - vol-conduktor-sql:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: on-failure:5
+
+  conduktor-cortex:
+    image: *conduktor-cortex-image
+    container_name: conduktor-cortex
+    environment:
+      CDK_CONSOLE-URL: "http://conduktor-console:8080"
+    ports:
+      - "9009:9009" # cortex api
+      - "9010:9010" # alertmanager api
+      - "9090:9090" # prometheus api
+    restart: on-failure:5
+
+volumes:
+  vol-conduktor-data:
+    name: vol-conduktor-data
+  vol-conduktor-metastore:
+    name: vol-conduktor-metastore
+  vol-conduktor-sql:
+    name: vol-conduktor-sql

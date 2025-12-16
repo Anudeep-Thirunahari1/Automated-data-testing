@@ -1,0 +1,20 @@
+[project]
+name = "dbt-clickhouse-analytics"
+version = "2.0"
+description = "Analytics engineering with dbt and ClickHouse"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+
+dependencies = [
+    "dbt-core>=1.8.9",
+    "dbt-clickhouse>=1.8.8",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.9.4",
+]
+
+[tool.ruff]
+line-length = 100
+lint.select = ["F", "E", "W", "I001"]

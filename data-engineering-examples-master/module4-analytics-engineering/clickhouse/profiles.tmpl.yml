@@ -1,0 +1,25 @@
+dbt_clickhouse_analytics:
+  outputs:
+    dev:
+      type: clickhouse
+      driver: http
+      host:     "{{ env_var('DBT_CLICKHOUSE_HOST', 'localhost') }}"
+      port:     "{{ env_var('DBT_CLICKHOUSE_PORT', 8123) | as_number }}"
+      schema:   "{{ env_var('DBT_CLICKHOUSE_TARGET_DATABASE') }}"
+      user:     "{{ env_var('DBT_CLICKHOUSE_USER', 'default') }}"
+      password: "{{ env_var('DBT_CLICKHOUSE_PASSWORD', '') }}"
+      secure: False
+      threads: 4
+
+    prod:
+      type: clickhouse
+      driver: http
+      host:     "{{ env_var('DBT_CLICKHOUSE_HOST') }}"
+      port:     "{{ env_var('DBT_CLICKHOUSE_PORT', 8123) | as_number }}"
+      schema:   "{{ env_var('DBT_CLICKHOUSE_TARGET_DATABASE') }}"
+      user:     "{{ env_var('DBT_CLICKHOUSE_USER') }}"
+      password: "{{ env_var('DBT_CLICKHOUSE_PASSWORD') }}"
+      secure: False
+      threads: 4
+
+  target: dev

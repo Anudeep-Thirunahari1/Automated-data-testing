@@ -1,0 +1,24 @@
+x-postgres-image: &postgres-image postgres:${POSTGRES_VERSION:-17-alpine}
+
+services:
+  ingest-db:
+    image: *postgres-image
+    container_name: ingest-db
+    environment:
+      POSTGRES_USER: 'postgres'
+      POSTGRES_PASSWORD: 'postgres'
+      POSTGRES_DB: 'nyc_taxi'
+    ports:
+      - '5432:5432'
+    volumes:
+      - vol-ingest-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: on-failure
+
+volumes:
+  vol-ingest-db:
+    name: vol-ingest-db
